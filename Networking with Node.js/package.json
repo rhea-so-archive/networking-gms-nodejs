@@ -1,0 +1,16 @@
+{
+	"name" : "gmsio_shoutbox_example",
+	"version" : "0.0.1",
+	"description" : "A simple shoutbox server implementing GMS.IO.",
+	"main" : "main.js",
+	"devDependencies" : {
+	},
+	"dependencies" : {
+		"uuid-v4" : "0.1.0",
+		"socket.io" : "0.9.16"
+	},
+	"engines" : {
+		"node" : "0.10.24",
+		"npm" : "1.2.18"
+	}
+}

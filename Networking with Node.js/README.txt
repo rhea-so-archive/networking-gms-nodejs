@@ -1,0 +1,1 @@
+Nickname_list.txt 파일이 꼭 있어야 합니다.

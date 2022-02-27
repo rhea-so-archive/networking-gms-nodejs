@@ -1,0 +1,217 @@
+/**
+A simple shoutbox server implementing GMS.IO.
+Author: Dickson Law
+(C) GameGeisha Interactive, 2010-2014
+*/
+
+//Setup information
+var tcp_port = 5833; //TCP port --- set to null to disable
+var sio_port = 5883; //Socket.IO port --- set to null to disable
+var ip = '127.0.0.1'; //IP address to bind to
+var server = require('./classes/dual_server.js').createServer();
+
+//Import classes
+var User = require('./classes/user.js');
+var UserBox = require('./classes/user_box.js');
+
+//Runtime tables
+var authenticated_users = UserBox.create();
+
+//Client-bound signal IDs
+const outsig_login_refused = 0;
+const outsig_login_accepted = 1;
+const outsig_shout_relay = 2;
+const outsig_user_leave = 3;
+const outsig_user_join = 4;
+
+//Server-bound signal IDs
+const insig_login = 0;
+const insig_shout = 1;
+
+
+//Utility function for sending ID-enabled messages
+function send_id_message(sock, id, msg) {
+	sock.send(JSON.stringify({
+		id: id,
+		msg: msg
+	}));
+}
+
+//Set up server functionality
+server.onConnection(function(dsocket) {
+	console.log("Received a new connection.");
+	
+	dsocket.onMessage(function(data) {
+		try {
+			//Parse incoming JSON
+			var json_data = JSON.parse(data);
+			var id = json_data.id;
+			var msg = json_data.msg;
+			console.log("Received a message (ID=" + id + "):", msg);
+			
+			//Route into different functions
+			switch (id) {
+				
+				//Sign-in request
+				case insig_login:
+					//Unauthenticated users only
+					if (authenticated_users.findUserBySocket(dsocket) == null) {
+						//Name already taken
+						if (authenticated_users.findUserByName(msg) != null) {
+							send_id_message(dsocket, outsig_login_refused, "");
+							console.log("Name rejected.");
+						}
+						//Name OK
+						else {
+							var new_user = User.create(msg, dsocket);
+							authenticated_users.addUser(new_user);
+							console.log("New user added:", new_user.name, "(" + new_user.uuid + ")");
+							//Tell user to come in
+							var new_user_announcement = JSON.stringify({
+								name: new_user.name,
+								uuid: new_user.uuid
+							});
+							send_id_message(dsocket, outsig_login_accepted, new_user_announcement);
+							//Announce to other users
+							authenticated_users.each(function(user) {
+								if (user.uuid != new_user.uuid) {
+									send_id_message(user.socket, outsig_user_join, new_user_announcement);
+								}
+							});
+						}
+					}
+				break;
+				
+				//Shout message
+				case insig_shout:
+					//Authenticated users only
+					var from_user;
+					if ((from_user = authenticated_users.findUserBySocket(dsocket)) != null) {
+						//Relay it to everyone else
+						var message_announcement = JSON.stringify({
+							from: from_user.name,
+							msg: msg
+						});
+						authenticated_users.each(function(user) {
+							if (user.uuid != from_user.uuid) {
+								send_id_message(user.socket, outsig_shout_relay, message_announcement);
+							}
+						});
+					}
+				break;
+
+				case 2:
+					// 메인 대기하는 사람들 and Authenticated users only
+					var from_user;
+					if ((from_user = authenticated_users.findUserBySocket(dsocket)) != null) {
+						//Relay it to everyone else
+						var message_announcement = JSON.stringify({
+							from: from_user.name
+						});
+						authenticated_users.each(function(user) {
+							if (user.uuid != from_user.uuid) {
+								send_id_message(user.socket, 6, message_announcement);
+							}
+						});
+					}
+					break;
+
+				case 3:
+					// 대결 걸기 테스트 and Authenticated users only
+					var from_user;
+					var other_name = json_data.other_name;
+					var my_name = json_data.my_name;
+					if ((from_user = authenticated_users.findUserBySocket(dsocket)) != null) {
+						//Relay it to everyone else
+						var message_announcement = JSON.stringify({
+							from: from_user.name,
+							other_name : other_name,
+							my_name : my_name
+						});
+						authenticated_users.each(function(user) {
+							if (user.uuid != from_user.uuid) {
+								send_id_message(user.socket, 7, message_announcement);
+							}
+						});
+					}
+					break;
+
+				case 4:
+					// 대결 수락 테스트 and Authenticated users only
+					var from_user;
+					var other_name = json_data.other_name;
+					var my_name = json_data.my_name;
+					if ((from_user = authenticated_users.findUserBySocket(dsocket)) != null) {
+						//Relay it to everyone else
+						var message_announcement = JSON.stringify({
+							from: from_user.name,
+							other_name : other_name,
+							my_name : my_name
+						});
+						authenticated_users.each(function(user) {
+							if (user.uuid != from_user.uuid) {
+								send_id_message(user.socket, 8, message_announcement);
+							}
+						});
+					}
+					break;
+
+				case 5:
+					// 대결 중 and Authenticated users only
+					var from_user;
+					var other_name = json_data.other_name;
+					var my_name = json_data.my_name;
+					var life = json_data.life;
+					var score = json_data.score;
+					if ((from_user = authenticated_users.findUserBySocket(dsocket)) != null) {
+						//Relay it to everyone else
+						var message_announcement = JSON.stringify({
+							from: from_user.name,
+							other_name : other_name,
+							my_name : my_name,
+							life : life,
+							score : score
+						});
+						authenticated_users.each(function(user) {
+							if (user.uuid != from_user.uuid) {
+								send_id_message(user.socket, 9, message_announcement);
+							}
+						});
+					}
+					break;
+
+				//Invalid message --- log it
+				default:
+					console.log("Discarded garbage (invalid ID).");
+				break;
+			}
+		}
+		catch (e) {
+			console.log("Error processing message, discarded.");
+		}
+	});
+	
+	dsocket.onClose(function() {
+		console.log("Closed a connection.");
+		//Respond for authenticated users only
+		var quitter;
+		if ((quitter = authenticated_users.findUserBySocket(dsocket)) != null) {
+			console.log("Removing user:", quitter.name, "(" + quitter.uuid + ")");
+			//Let everyone else know the user is leaving
+			var logout_announcement = JSON.stringify({
+				name: quitter.name,
+				uuid: quitter.uuid
+			});
+			authenticated_users.each(function(user) {
+				if (user.uuid != quitter.uuid) {
+					send_id_message(user.socket, outsig_user_leave, logout_announcement);
+				}
+			});
+			//Remove the user
+			authenticated_users.removeUser(quitter.uuid);
+		}
+	});
+});
+
+//Boot the server
+server.listen(tcp_port, sio_port, ip);
